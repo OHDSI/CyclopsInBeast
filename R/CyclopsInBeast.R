@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#' @useDynLib CyclopsInBeast, .registration = TRUE
 #' @keywords internal
 "_PACKAGE"
 
@@ -26,6 +27,38 @@
 NULL
 
 .onLoad <- function(libname, pkgname) {
+  cat("onLoad\n")
   beastLocation <- system.file("java/beast.jar", package = "BeastJar")
-  rJava::.jpackage(pkgname, lib.loc = libname, morePaths = beastLocation)
+  rJava::.jpackage(pkgname, lib.loc = libname, nativeLibrary = TRUE, morePaths = beastLocation)
+  # cat(libname)
+  # cat("\n")
+  # cat(pkgname)
+  # cat("\n")
+  rJava::.jcall("org/ohdsi/cyclops/CyclopsJniWrapper", "V", "addLibrary",
+                .getObjectName(libname, "CyclopsInBeast"))
+  rJava::.jcall("org/ohdsi/cyclops/CyclopsJniWrapper", "V", "addLibrary",
+                .getObjectName(libname, "Cyclops"))
 }
+
+.getObjectName <- function(libname, pkgname) {
+  libs <- "libs"
+  if (nchar(.Platform$r_arch)) {
+    lib <- file.path("libs", .Platform$r_arch)
+  }
+  lib <- system.file(libs, paste(pkgname, .Platform$dynlib.ext,
+                                 sep = ""), package = pkgname)
+  return(lib)
+}
+
+
+
+
+
+
+
+
+.onUnload <- function (libpath) {
+  library.dynam.unload("CyclopsInBeast", libpath)
+}
+
+

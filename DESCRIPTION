@@ -16,7 +16,10 @@ Depends:
   R (>= 3.5.0)
 Imports:
   Cyclops (>= 3.1.0),
-  BeastJar
+  BeastJar,
+  rJava,
+  xptr,
+  survival
 Suggests:
   knitr,
   rmarkdown,
