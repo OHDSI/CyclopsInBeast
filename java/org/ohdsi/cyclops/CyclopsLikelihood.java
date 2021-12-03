@@ -8,15 +8,15 @@ import java.util.Queue;
 
 public class CyclopsLikelihood extends AbstractModelLikelihood implements GradientWrtParameterProvider {
 
-    private static final boolean DEBUG = true;
-    private static final boolean DEBUG_LAZY = true;
+    private static final boolean DEBUG = false;
+    private static final boolean DEBUG_LAZY = false;
 
     private final CyclopsPtr cyclops;
     private final int dim;
     private final Parameter beta;
 
     private boolean betaChanged;
-//    private boolean storedBetaChanged;
+    private boolean storedBetaChanged;
     private final Queue<Integer> betaFlag = new LinkedList<>();
 
     private double logLikelihood;
@@ -31,6 +31,9 @@ public class CyclopsLikelihood extends AbstractModelLikelihood implements Gradie
     private double[] gh;
     private double[] storedGh;
 
+    private int computeLikelihoodCount = 0;
+    private int computeGradientCount = 0;
+
     public CyclopsLikelihood(String name, String dataString, String fitString, Parameter parameter) {
         super(name);
 
@@ -42,6 +45,9 @@ public class CyclopsLikelihood extends AbstractModelLikelihood implements Gradie
             beta.setDimension(dim);
         }
 
+        beta.addBounds(new Parameter.DefaultBounds(Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY,
+                beta.getDimension()));
+
         for (int i = 0; i < dim; ++i) {
             beta.setParameterValueQuietly(i, cyclops.getBeta(i));
         }
@@ -50,68 +56,18 @@ public class CyclopsLikelihood extends AbstractModelLikelihood implements Gradie
         addVariable(beta);
         betaChanged = false;
 
+        logLikelihood = cyclops.getLogLikelihood();
+        logLikelihoodKnown = true;
+
         if (DEBUG) {
             System.err.println("cyclopsPtr: " + cyclops);
         }
     }
 
-    private void updateBeta() {
-        if (betaChanged) {
-            if (betaFlag.isEmpty()) {
-                cyclops.setBeta(beta.getParameterValues());
-            } else {
-                while (!betaFlag.isEmpty()) {
-                    final int index = betaFlag.remove();
-                    cyclops.setBeta(index, beta.getParameterValue(index));
-                }
-            }
-            betaChanged = false;
-        }
+    @SuppressWarnings("unused")
+    public int[] getCounts() {
+        return new int[] { computeLikelihoodCount, computeGradientCount };
     }
-
-//    private debug() {
-//
-//        System.err.print("Check getBetaSize ...");
-//        int len = cyclops.getBetaSize();
-//        System.err.println("Done");
-//
-//        System.err.print("Check getLogLikelihood ...");
-//        double ll = cyclops.getLogLikelihood();
-//        System.err.println("Done");
-//
-//        System.err.print("Check getBeta ...");
-//        cyclops.getBeta( 0);
-//        System.err.println("Done");
-//
-//        System.err.print("Check getGradient ...");
-//        double[] gradient = new double[len * 2];
-//        cyclops.getGradientAndHessianDiagonal(gradient);
-//        for (int i = 0; i < gradient.length; ++i) {
-//            System.err.print(" " + gradient[i]);
-//        }
-//        System.err.print(" ");
-//        System.err.println("Done");
-//
-//        System.err.print("Check setBeta1 ...");
-//        cyclops.setBeta(0, 2.0);
-//        System.err.println("Done");
-//
-//        System.err.print("Check setBeta2 ...");
-//        cyclops.setBeta(new double[len]);
-//        System.err.println("Done");
-//
-//        System.err.println("logLike1 = " + ll);
-//        System.err.println("logLike1 = " + cyclops.getLogLikelihood());
-//
-//        System.err.print("Check getGradient ...");
-//        cyclops.getGradientAndHessianDiagonal(gradient);
-//        for (int i = 0; i < gradient.length; ++i) {
-//            System.err.print(" " + gradient[i]);
-//        }
-//        System.err.print(" ");
-//        System.err.println("Done");
-//
-//    }
 
     @Override
     public Likelihood getLikelihood() {
@@ -143,14 +99,6 @@ public class CyclopsLikelihood extends AbstractModelLikelihood implements Gradie
         return gradient;
     }
 
-    private void computeGh() {
-        if (gh == null) {
-            gh = new double[2 * dim];
-        }
-
-        cyclops.getGradientAndHessianDiagonal(gh);
-    }
-
     @Override
     public Model getModel() {
         return this;
@@ -171,10 +119,6 @@ public class CyclopsLikelihood extends AbstractModelLikelihood implements Gradie
         }
 
         return logLikelihood;
-    }
-
-    private void checkLazySettings() {
-        // TODO
     }
 
     @Override
@@ -206,6 +150,7 @@ public class CyclopsLikelihood extends AbstractModelLikelihood implements Gradie
     protected void storeState() {
         storedLogLikelihoodKnown = logLikelihoodKnown;
         storedGradientKnown = gradientKnown;
+        storedBetaChanged = betaChanged;
 
         storedLogLikelihood = logLikelihood;
 
@@ -219,10 +164,11 @@ public class CyclopsLikelihood extends AbstractModelLikelihood implements Gradie
 
     @Override
     protected void restoreState() {
-        logLikelihood = storedLogLikelihood;
-
         logLikelihoodKnown = storedLogLikelihoodKnown;
         gradientKnown = storedGradientKnown;
+        betaChanged = storedBetaChanged;
+
+        logLikelihood = storedLogLikelihood;
 
         double[] tmp = storedGh;
         storedGh = gh;
@@ -234,7 +180,43 @@ public class CyclopsLikelihood extends AbstractModelLikelihood implements Gradie
         // Do nothing
     }
 
+    private void updateBeta() {
+        if (betaChanged) {
+            if (betaFlag.isEmpty()) {
+                if (DEBUG) {
+                    System.err.println("Setting all beta");
+                }
+                cyclops.setBeta(beta.getParameterValues());
+            } else {
+                while (!betaFlag.isEmpty()) {
+                    final int index = betaFlag.remove();
+                    if (DEBUG) {
+                        System.err.println("Setting beta dimension " + index);
+                    }
+                    cyclops.setBeta(index, beta.getParameterValue(index));
+                }
+            }
+            betaChanged = false;
+            logLikelihoodKnown = false;
+            gradientKnown = false;
+        }
+    }
+
     private double computeLogLikelihood() {
+        ++computeLikelihoodCount;
         return cyclops.getLogLikelihood();
+    }
+
+    private void computeGh() {
+        ++computeGradientCount;
+        if (gh == null) {
+            gh = new double[2 * dim];
+        }
+
+        cyclops.getGradientAndHessianDiagonal(gh);
+    }
+
+    private void checkLazySettings() {
+        // TODO
     }
 }
