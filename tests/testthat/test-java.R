@@ -92,3 +92,42 @@ start, length, event, x1, x2
                            seed = 666)
 
 })
+
+test_that("Compare exact simulation to likelihood-profile-use", {
+  skip_if_not(supportsJava8())
+
+  set.seed(666)
+  population <- EvidenceSynthesis::simulatePopulations(EvidenceSynthesis::createSimulationSettings(nSites = 1))[[1]]
+  cyclopsData <- Cyclops::createCyclopsData(Surv(time, y) ~ x + strata(stratumId),
+                                            data = population,
+                                            modelType = "cox")
+  cyclopsFit <- Cyclops::fitCyclopsModel(cyclopsData)
+  likelihoodProfile <- EvidenceSynthesis::approximateLikelihood(cyclopsFit, parameter = "x", approximation = "grid")
+
+  # Exact simulation
+  runner <-
+    simulateBayesianAnalysis(cyclopsFit,
+                             chainLength = 110000,
+                             burnIn = 1e+04,
+                             subSampleFrequency = 100,
+                             priorMean = 1,
+                             priorSd = 2,
+                             seed = 666)
+  trace <- runner$getTrace(as.integer(3))
+  exactMean <- mean(trace)
+  exactSd <- sd(trace)
+
+  # Likelihood-profile simulation
+  traces <- EvidenceSynthesis::approximateSimplePosterior(likelihoodProfile = likelihoodProfile,
+                                                          chainLength = 110000,
+                                                          burnIn = 1e+04,
+                                                          subSampleFrequency = 100,
+                                                          priorMean = 1,
+                                                          priorSd = 2,
+                                                          seed = 666)
+  profileMean <- mean(traces$theta1)
+  profileSd <- sd(traces$theta1)
+
+  expect_equal(profileMean, exactMean, tolerance = 5e-2)  # TODO: Is the profile approximation that bad?
+  expect_equal(profileSd, exactSd, tolerance = 5e-2)
+})
